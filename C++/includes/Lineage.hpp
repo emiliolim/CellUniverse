@@ -18,6 +18,8 @@
 
 namespace fs = std::filesystem;
 
+std::vector<cv::Mat> interpolateSlices(const cv::Mat& slice1, const cv::Mat& slice2, int numInterpolations = 7);
+
 cv::Mat processImage(const cv::Mat &image, const BaseConfig &config);
 
 std::vector<cv::Mat> loadFrame(const std::string &imageFile, const BaseConfig &config);

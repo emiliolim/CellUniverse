@@ -27,6 +27,26 @@ namespace utils
     }
 }
 
+// Function to interpolate between two slices
+std::vector<cv::Mat> interpolateSlices(const cv::Mat& slice1, const cv::Mat& slice2, int numInterpolations) {
+    //Ensure the two slices have the same size and type
+    // std::cout << "slice1 size: " << slice1.size() << " " << "slice2 size: " << slice2.size();
+    if (slice1.size() != slice2.size() || slice1.type() != slice2.type()) {
+        throw std::invalid_argument("Slices must have the same size and type for interpolation!");
+    }
+
+    std::vector<cv::Mat> interpolatedSlices;
+
+    // Perform interpolation
+    for (int i = 1; i <= numInterpolations; ++i) {
+        double t = static_cast<double>(i) / (numInterpolations + 1);
+        cv::Mat interpolatedSlice = (1.0 - t) * slice1 + t * slice2;
+        interpolatedSlices.push_back(interpolatedSlice);
+    }
+
+    return interpolatedSlices;
+}
+
 Image processImage(const Image &image, const BaseConfig &config)
 {
     Image processedImage;
@@ -75,6 +95,15 @@ std::vector<cv::Mat> loadFrame(const std::string &imageFile, const BaseConfig &c
             cv::Mat slice = rawImages[i].clone();
             cv::cvtColor(slice, slice, cv::COLOR_BGR2GRAY);
             cv::Mat processedImg = processImage(slice, config);
+            if(i > 0)
+            {
+                unsigned num_interpolated_slices = 7;
+                std::vector<cv::Mat> interSlices{interpolateSlices(imgs.front(), processedImg, num_interpolated_slices)};
+                for (unsigned i = 0; i < num_interpolated_slices; ++i)
+                {
+                    imgs.push_back(interSlices[i]);
+                }
+            }
             imgs.push_back(processedImg);
         }
     }
