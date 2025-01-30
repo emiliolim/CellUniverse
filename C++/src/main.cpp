@@ -40,10 +40,10 @@ PathVec getImageFilePaths(const std::string &inputPattern, int firstFrame, int l
             // Setup some configurations automatically if they are tif files
             if (file.extension() == ".tif" || file.extension() == ".tiff")
             {
-                std::vector<cv::Mat> images;
-                cv::imreadmulti(file.string(), images, cv::IMREAD_UNCHANGED);
+                std::vector<cv::Mat> frame;
+                cv::imreadmulti(file.string(), frame, cv::IMREAD_UNCHANGED);
                 //                std::cout << "Loaded " << images.size() << " images from the TIFF file." << std::endl;
-                int slices = images.size(); // Assuming the first dimension is the number of slices
+                int slices = frame.size(); // Assuming the first dimension is the number of slices
                 // set the uninitialized z_slices and z_values
                 config.simulation.z_slices = slices;
                 config.simulation.z_values.clear();
@@ -122,7 +122,7 @@ int main(int argc, char *argv[])
     {
         lineage.optimize(frame);
         lineage.copyCellsForward(frame + 1);
-        lineage.saveImages(frame);
+        lineage.saveFrame(frame);
         // lineage.saveCells(frame); // TODO: Fix this
     }
     auto end = std::chrono::steady_clock::now();

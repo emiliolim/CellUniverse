@@ -27,26 +27,6 @@ namespace utils
     }
 }
 
-// Function to interpolate between two slices
-std::vector<cv::Mat> interpolateSlices(const cv::Mat& slice1, const cv::Mat& slice2, int numInterpolations) {
-    //Ensure the two slices have the same size and type
-    // std::cout << "slice1 size: " << slice1.size() << " " << "slice2 size: " << slice2.size();
-    if (slice1.size() != slice2.size() || slice1.type() != slice2.type()) {
-        throw std::invalid_argument("Slices must have the same size and type for interpolation!");
-    }
-
-    std::vector<cv::Mat> interpolatedSlices;
-
-    // Perform interpolation
-    for (int i = 1; i <= numInterpolations; ++i) {
-        double t = static_cast<double>(i) / (numInterpolations + 1);
-        cv::Mat interpolatedSlice = (1.0 - t) * slice1 + t * slice2;
-        interpolatedSlices.push_back(interpolatedSlice);
-    }
-
-    return interpolatedSlices;
-}
-
 Image processImage(const Image &image, const BaseConfig &config)
 {
     Image processedImage;
@@ -74,38 +54,60 @@ Image processImage(const Image &image, const BaseConfig &config)
 
 std::vector<cv::Mat> loadFrame(const std::string &imageFile, const BaseConfig &config)
 {
-    std::vector<cv::Mat> imgs;
+    std::vector<cv::Mat> processedZSlices; // vector of matrices, each matrix is a 2D image
+    std::vector<cv::Mat> interpolatedZSlices;
+
     // Get the file extension
     std::string extension = imageFile.substr(imageFile.find_last_of('.') + 1);
     if (extension == "tiff" || extension == "tif")
     {
-        std::vector<cv::Mat> rawImages;
-        cv::imreadmulti(imageFile, rawImages, cv::IMREAD_ANYDEPTH | cv::IMREAD_COLOR);
-        cv::Mat img = rawImages[0];
+        std::vector<cv::Mat> tiffImage;
+        cv::imreadmulti(imageFile, tiffImage, cv::IMREAD_ANYDEPTH | cv::IMREAD_COLOR);
+        long unsigned numTiffSlices {tiffImage.size()};
+	    assert(numTiffSlices == 33); // FIXME: just for the Pavak's test files
+        cv::Mat img = tiffImage[0];
+
         if (img.empty())
         {
             std::cout << "Error: Could not read the TIFF image" << std::endl;
-            return imgs;
+            return processedZSlices;
         }
 
-        unsigned slices = rawImages.size();
-
-        for (unsigned i = 0; i < slices; ++i)
+        // Iterate through tiffImage, begin coversion to black and white, blurring
+        for (unsigned i = 0; i < numTiffSlices; ++i) // should we end at == slices?
         {
-            cv::Mat slice = rawImages[i].clone();
+            cv::Mat slice = tiffImage[i].clone();
             cv::cvtColor(slice, slice, cv::COLOR_BGR2GRAY);
             cv::Mat processedImg = processImage(slice, config);
-            if(i > 0)
-            {
-                unsigned num_interpolated_slices = 7;
-                std::vector<cv::Mat> interSlices{interpolateSlices(imgs.front(), processedImg, num_interpolated_slices)};
-                for (unsigned i = 0; i < num_interpolated_slices; ++i)
-                {
-                    imgs.push_back(interSlices[i]);
-                }
-            }
-            imgs.push_back(processedImg);
+            processedZSlices.push_back(processedImg);
         }
+
+        const int expandFactor = 7; 
+        // there will be (expandFactor-1) interpolated slices between each "real" one.
+        // we need one extra at the very top to hold the top "real" z-Slice.
+        unsigned numSynthSlices = expandFactor * (numTiffSlices-1) + 1; // 225 for 33 slices
+
+        // for checking
+        // std::cout << "Number of synthetic slices: " << numSynthSlices << std::endl;
+        
+        // Pseudo-code for creating the new vector of matrices with interpolated zSlices
+        // iterate through synthslices and interpolate between each "real" slice
+        for (int synthSlice = 0; synthSlice < numSynthSlices; ++synthSlice) {
+            int tiffSlice = int(synthSlice / expandFactor); // "real" slice index 
+            if(synthSlice % expandFactor == 0) 
+            { // copy the real slice to the synth one, verbatim
+            interpolatedZSlices.push_back(processedZSlices[tiffSlice]);
+            } 
+            else if (synthSlice % expandFactor == 1) {
+                // Interpolate between realTiff[tiffSlice] and realTiff[tiffSlice + 1]
+                interpolateSlices(processedZSlices[tiffSlice], 
+                                processedZSlices[tiffSlice + 1], 
+                                interpolatedZSlices, 
+                                expandFactor - 1);
+            }
+        }
+        // here do one FINAL copy of the very top tiff [number 32] to the very top interp [225, not 224!]
+        // interpolatedZSlices.push_back(processedZSlices[32]);
     }
     else
     {
@@ -114,7 +116,7 @@ std::vector<cv::Mat> loadFrame(const std::string &imageFile, const BaseConfig &c
         if (img.empty())
         {
             std::cout << "Error: Could not read the image" << std::endl;
-            return imgs;
+            return processedZSlices;
         }
 
         if (img.channels() == 3)
@@ -122,11 +124,73 @@ std::vector<cv::Mat> loadFrame(const std::string &imageFile, const BaseConfig &c
             cv::cvtColor(img, img, cv::COLOR_BGR2GRAY);
         }
 
-        imgs.push_back(processImage(img, config));
+        processedZSlices.push_back(processImage(img, config));
     }
-    //    std::cout << "The size of the imgs is " << imgs.size() << std::endl;
-    return imgs;
+    if (interpolatedZSlices.size() != 225) {
+        std::string errorMessage = "interpolatedZSlices must have exactly 255 slices, but has " +
+                                std::to_string(interpolatedZSlices.size()) + " slices";
+        throw std::runtime_error(errorMessage);
+    }
+    std::cout << std::to_string(interpolatedZSlices.size()) << "slices built successfully" << std::endl;
+    return interpolatedZSlices;
 }
+
+// std::vector<cv::Mat> loadFrame(const std::string &imageFile, const BaseConfig &config)
+// {
+//     std::vector<cv::Mat> imgs;
+//     // Get the file extension
+//     std::string extension = imageFile.substr(imageFile.find_last_of('.') + 1);
+//     if (extension == "tiff" || extension == "tif")
+//     {
+//         std::vector<cv::Mat> rawImages;
+//         cv::imreadmulti(imageFile, rawImages, cv::IMREAD_ANYDEPTH | cv::IMREAD_COLOR);
+//         assert(rawImages.size() ==33);
+//         cv::Mat img = rawImages[0];
+//         if (img.empty())
+//         {
+//             std::cout << "Error: Could not read the TIFF image" << std::endl;
+//             return imgs;
+//         }
+
+//         unsigned numSlices = rawImages.size();
+
+//         for (unsigned z = 0; z < slices; ++z)
+//         {
+//             cv::Mat slice = rawImages[z].clone();
+//             cv::cvtColor(slice, slice, cv::COLOR_BGR2GRAY);
+//             cv::Mat processedImg = processImage(slice, config);
+//             if(z > 0)
+//             {
+//                 unsigned num_interpolated_slices = 6;
+//                 std::vector<cv::Mat> interSlices{interpolateSlices(imgs.front(), processedImg, num_interpolated_slices)};
+//                 for (unsigned j = 0; j < num_interpolated_slices; ++j)
+//                 {
+//                     imgs.push_back(interSlices[j]);
+//                 }
+//             }
+//             imgs.push_back(processedImg);
+//         }
+//     }
+//     else
+//     {
+//         // TODO: fix this
+//         cv::Mat img = cv::imread(imageFile);
+//         if (img.empty())
+//         {
+//             std::cout << "Error: Could not read the image" << std::endl;
+//             return imgs;
+//         }
+
+//         if (img.channels() == 3)
+//         {
+//             cv::cvtColor(img, img, cv::COLOR_BGR2GRAY);
+//         }
+
+//         imgs.push_back(processImage(img, config));
+//     }
+//     //    std::cout << "The size of the imgs is " << imgs.size() << std::endl;
+//     return imgs;
+// }
 
 Lineage::Lineage(std::map<std::string, std::vector<Sphere>> initialCells, PathVec imagePaths, BaseConfig &config, std::string outputPath, int continueFrom)
     : config(config), outputPath(outputPath)
@@ -238,15 +302,15 @@ void Lineage::optimize(int frameIndex)
     }
 }
 
-void Lineage::saveImages(int frameIndex)
+void Lineage::saveFrame(int frameIndex)
 {
     if (frameIndex < 0 || static_cast<size_t>(frameIndex) >= frames.size())
     {
         throw std::invalid_argument("Invalid frame index");
     }
 
-    std::vector<Image> realImages = frames[frameIndex].generateOutputFrame();
-    std::vector<Image> synthImages = frames[frameIndex].generateOutputSynthFrame();
+    std::vector<cv::Mat> realFrame = frames[frameIndex].generateOutputFrame();
+    std::vector<cv::Mat> synthFrame = frames[frameIndex].generateOutputSynthFrame();
     std::cout << "Saving images for frame " << frameIndex << "..." << std::endl;
 
     std::string realOutputPath = outputPath + "/real/" + std::to_string(frameIndex);
@@ -254,10 +318,10 @@ void Lineage::saveImages(int frameIndex)
     {
         std::filesystem::create_directories(realOutputPath);
     }
-    for (size_t i = 0; i < realImages.size(); ++i)
+    for (size_t i = 0; i < realFrame.size(); ++i)
     {
         // Save real images
-        cv::imwrite(realOutputPath + "/" + std::to_string(i) + ".png", realImages[i]);
+        cv::imwrite(realOutputPath + "/" + std::to_string(i) + ".png", realFrame[i]);
     }
 
     std::string synthOutputPath = outputPath + "/synth/" + std::to_string(frameIndex);
@@ -265,10 +329,10 @@ void Lineage::saveImages(int frameIndex)
     {
         std::filesystem::create_directories(synthOutputPath);
     }
-    for (size_t i = 0; i < synthImages.size(); ++i)
+    for (size_t i = 0; i < synthFrame.size(); ++i)
     {
         // Save synthetic images
-        cv::imwrite(synthOutputPath + "/" + std::to_string(i) + ".png", synthImages[i]);
+        cv::imwrite(synthOutputPath + "/" + std::to_string(i) + ".png", synthFrame[i]);
     }
 
     std::cout << "Done" << std::endl;
